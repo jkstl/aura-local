@@ -156,6 +156,9 @@ class AuraAssistant:
             print("Falling back to CPU for STT...")
             self.stt_model = WhisperModel("base.en", device="cpu", compute_type="int8")
 
+        # Session history for long-term memory
+        self.session_history = []
+        
         # Audio playback queue and thread
         self.audio_queue = queue.Queue()
         self.playback_thread = threading.Thread(target=self._playback_worker, daemon=True)
@@ -250,7 +253,83 @@ class AuraAssistant:
                 'type': 'function',
                 'function': {
                     'name': 'get_system_info',
-                    'description': 'Returns current system status like CPU and memory usage.',
+                    'description': 'Returns current system status like CPU, memory, and battery usage.',
+                }
+            },
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'list_directory',
+                    'description': 'Lists files and folders in a specific directory.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'path': {
+                                'type': 'string',
+                                'description': 'The path to list (defaults to \'.\')',
+                            },
+                        },
+                    },
+                }
+            },
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'read_file',
+                    'description': 'Reads the content of a text-based file.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'path': {
+                                'type': 'string',
+                                'description': 'The path to the file to read.',
+                            },
+                        },
+                        'required': ['path'],
+                    },
+                }
+            },
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'write_file',
+                    'description': 'Writes or appends a text snippet to a file.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'path': {
+                                'type': 'string',
+                                'description': 'The path to the file.',
+                            },
+                            'content': {
+                                'type': 'string',
+                                'description': 'The text content to write.',
+                            },
+                            'mode': {
+                                'type': 'string',
+                                'description': 'Writing mode: \'w\' (overwrite) or \'a\' (append). Defaults to \'a\'.',
+                                'enum': ['w', 'a']
+                            }
+                        },
+                        'required': ['path', 'content'],
+                    },
+                }
+            },
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'set_volume',
+                    'description': 'Adjusts the system volume.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'level': {
+                                'type': 'integer',
+                                'description': 'Volume level (0-100).',
+                            },
+                        },
+                        'required': ['level'],
+                    },
                 }
             }
         ]
@@ -281,7 +360,46 @@ class AuraAssistant:
         elif name == 'get_system_info':
             cpu = psutil.cpu_percent()
             mem = psutil.virtual_memory().percent
-            return f"CPU Usage: {cpu}% | Memory Usage: {mem}%"
+            battery = psutil.sensors_battery()
+            batt_str = f", Battery: {battery.percent}%" if battery else ""
+            return f"CPU Usage: {cpu}% | Memory Usage: {mem}%{batt_str}"
+        
+        elif name == 'list_directory':
+            path = args.get('path', '.')
+            try:
+                items = os.listdir(path)
+                return f"Contents of {path}: " + ", ".join(items)
+            except Exception as e:
+                return f"Error listing directory: {e}"
+
+        elif name == 'read_file':
+            path = args.get('path')
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                return f"Content of {path}:\n{content[:2000]}" # Limit to 2k chars
+            except Exception as e:
+                return f"Error reading file: {e}"
+
+        elif name == 'write_file':
+            path = args.get('path')
+            content = args.get('content')
+            mode = args.get('mode', 'a')
+            try:
+                with open(path, mode, encoding='utf-8') as f:
+                    f.write(content + "\n")
+                return f"Successfully {'written' if mode=='w' else 'appended'} to {path}"
+            except Exception as e:
+                return f"Error writing to file: {e}"
+
+        elif name == 'set_volume':
+            level = args.get('level')
+            try:
+                # Basic Linux amixer call
+                subprocess.run(["amixer", "set", "Master", f"{level}%"], check=True)
+                return f"System volume set to {level}%"
+            except Exception as e:
+                return f"Error setting volume: {e}"
         
         return "Error: Tool not found."
 
@@ -308,6 +426,7 @@ class AuraAssistant:
         try:
             choice = input("\nSelect mode (1 or 2): ").strip()
         except (EOFError, KeyboardInterrupt):
+            self._update_long_term_memory()
             print("\nGoodbye!")
             return
 
@@ -315,6 +434,8 @@ class AuraAssistant:
             self.voice_chat_loop()
         else:
             self.text_chat_loop()
+            
+        self._update_long_term_memory()
 
     def text_chat_loop(self):
         print("\n--- Text Chat Mode Active ---")
@@ -427,6 +548,7 @@ class AuraAssistant:
         if full_system_prompt:
             messages.append({'role': 'system', 'content': full_system_prompt})
         messages.append({'role': 'user', 'content': prompt})
+        self.session_history.append({'role': 'user', 'content': prompt})
 
         while True:
             full_response = ""
@@ -476,6 +598,7 @@ class AuraAssistant:
                 
                 if header_printed:
                     print() # End the Aura line
+                    self.session_history.append({'role': 'assistant', 'content': full_response})
 
                 # 3. If there were tool calls, execute them and RE-QUERY
                 if tool_calls:
@@ -493,6 +616,36 @@ class AuraAssistant:
             except Exception as e:
                 print(f"\nError getting response: {e}")
                 break
+
+    def _update_long_term_memory(self):
+        """Summarizes the session and saves important facts to the knowledge base."""
+        if not self.session_history:
+            return
+
+        print("\nUpdating Aura's long-term memory...")
+        try:
+            # Use a quick summary prompt
+            summary_prompt = "Below is a chat history between Aura and Jeff. Summarize any important facts about Jeff, his preferences, or significant tasks discussed. Be concise and write in a way that can be indexed into a knowledge base. If nothing important was discussed, simply return 'NO_NEW_FACTS'.\n\nHistory:\n"
+            for msg in self.session_history:
+                summary_prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
+            
+            resp = ollama.chat(
+                model=self.ollama_model,
+                messages=[{'role': 'user', 'content': summary_prompt}]
+            )
+            
+            summary = resp['message']['content'].strip()
+            
+            if "NO_NEW_FACTS" not in summary.upper():
+                memory_file = os.path.join(KNOWLEDGE_DIR, "memory.txt")
+                with open(memory_file, 'a', encoding='utf-8') as f:
+                    f.write(f"\n--- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+                    f.write(summary + "\n")
+                print("✅ Memory updated.")
+            else:
+                print("ℹ️ No new key facts to remember from this session.")
+        except Exception as e:
+            print(f"Warning: Could not update long-term memory: {e}")
 
     def ask_aura(self):
         try:

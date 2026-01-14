@@ -7,8 +7,9 @@ This is a specialized branch of **Aura-Local**, specifically optimized for high-
 - **Sentence-Level Streaming**: Aura starts speaking as soon as the first sentence is generated.
 - **GPU Accelerated TTS**: Uses `onnxruntime-gpu` to run Kokoro-ONNX on CUDA.
 - **Improved STT**: Uses `faster-whisper` on CUDA with the `base.en` model for better accuracy than the CPU version.
+- **Self-Learning Memory**: Aura summarizes your conversations on exit and remembers key facts about you next time she starts.
+- **Filesystem & OS Tools**: Aura can list directories, read/write files, and control system volume.
 - **Smart RAG**: Enhanced Knowledge Base with Cosine Similarity and relevancy thresholds to prevent hallucinations.
-- **Tool Calling**: Supports real-time tool use (Time, Browser, System Info) even while streaming speech.
 
 ## 🛠️ Prerequisites
 
