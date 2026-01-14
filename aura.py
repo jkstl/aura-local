@@ -1,3 +1,8 @@
+import os
+# Suppress Hugging Face warnings and telemetry
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+
 import ollama
 from kokoro_onnx import Kokoro
 import sounddevice as sd
@@ -13,6 +18,8 @@ import psutil
 import webbrowser
 from datetime import datetime
 import chromadb
+import queue
+import re
 from chromadb.config import Settings
 from pypdf import PdfReader
 from faster_whisper import WhisperModel
@@ -32,7 +39,11 @@ EMBED_MODEL = "nomic-embed-text"
 class KnowledgeBase:
     def __init__(self):
         self.chroma_client = chromadb.PersistentClient(path="./aura_db")
-        self.collection = self.chroma_client.get_or_create_collection(name="aura_knowledge")
+        # Use Cosine Similarity for better semantic relevance
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="aura_knowledge",
+            metadata={"hnsw:space": "cosine"}
+        )
         
     def index_files(self):
         if not os.path.exists(KNOWLEDGE_DIR):
@@ -98,7 +109,18 @@ class KnowledgeBase:
                 query_embeddings=[embedding],
                 n_results=n_results
             )
-            return results['documents'][0] if results['documents'] else []
+            
+            # Filter results by distance
+            valid_docs = []
+            if results['documents'] and results['distances']:
+                for doc, dist in zip(results['documents'][0], results['distances'][0]):
+                    # With cosine: 0.0 is identical, 1.0 is unrelated, 2.0 is opposite.
+                    # 0.45 is a solid threshold for 'actually relevant'
+                    if dist < 0.45: 
+                        valid_docs.append(doc)
+                    # print(f"      [DEBUG: Distance check - {dist:.4f}]") # Enable for debugging
+            
+            return valid_docs
         except Exception as e:
             print(f"Error querying knowledge base: {e}")
             return []
@@ -119,7 +141,7 @@ class AuraAssistant:
         print("Loading Aura's voice engine (GPU Accelerated)...")
         try:
             # Added providers for GPU acceleration
-            self.kokoro = Kokoro(MODEL_FILE, VOICE_FILE, providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+            self.kokoro = Kokoro(MODEL_FILE, VOICE_FILE)
         except Exception as e:
             print(f"Error loading Kokoro engine: {e}")
             sys.exit(1)
@@ -134,7 +156,42 @@ class AuraAssistant:
             print("Falling back to CPU for STT...")
             self.stt_model = WhisperModel("base.en", device="cpu", compute_type="int8")
 
-    def _download_file(self, url, filename):
+        # Audio playback queue and thread
+        self.audio_queue = queue.Queue()
+        self.playback_thread = threading.Thread(target=self._playback_worker, daemon=True)
+        self.playback_thread.start()
+
+    def _playback_worker(self):
+        """Background thread that plays audio chunks from the queue."""
+        while True:
+            samples, sample_rate = self.audio_queue.get()
+            if samples is None: # Exit signal
+                break
+            try:
+                sd.play(samples, sample_rate)
+                sd.wait()
+            except Exception as e:
+                print(f"Error playing audio chunk: {e}")
+            self.audio_queue.task_done()
+
+    def speak_chunk(self, text):
+        """Generates audio for a single sentence and adds to playback queue."""
+        if not text.strip():
+            return
+        try:
+            samples, sample_rate = self.kokoro.create(
+                text, 
+                voice=self.voice, 
+                speed=self.speed, 
+                lang=self.lang
+            )
+            self.audio_queue.put((samples, sample_rate))
+        except Exception as e:
+            print(f"Error generating audio for chunk: {e}")
+
+    def speak(self, text):
+        """Deprecated: Use speak_chunk for streaming or call this for one-off messages."""
+        self.speak_chunk(text)
         print(f"Downloading {filename}...")
         try:
             response = requests.get(url, stream=True)
@@ -372,38 +429,69 @@ class AuraAssistant:
         messages.append({'role': 'user', 'content': prompt})
 
         while True:
+            full_response = ""
+            sentence_buffer = ""
+            tool_calls = []
+            
             try:
-                response = ollama.chat(
+                stream = ollama.chat(
                     model=self.ollama_model, 
                     messages=messages,
-                    tools=self.available_tools
+                    tools=self.available_tools,
+                    stream=True,
                 )
                 
-                message = response['message']
+                header_printed = False
                 
-                # If there are tool calls, execute them and continue the loop
-                if message.get('tool_calls'):
-                    messages.append(message)
-                    for tool in message['tool_calls']:
+                for chunk in stream:
+                    message = chunk['message']
+                    
+                    # 1. Handle Tool Calls
+                    if message.get('tool_calls'):
+                        tool_calls.extend(message['tool_calls'])
+                    
+                    # 2. Handle Content (Streaming to TTS)
+                    if message.get('content'):
+                        if not header_printed:
+                            print("\nAura: ", end="", flush=True)
+                            header_printed = True
+                            
+                        content = message['content']
+                        full_response += content
+                        sentence_buffer += content
+                        print(content, end="", flush=True)
+
+                        # Split by sentence endings
+                        if any(c in content for c in ".!?\n"):
+                            parts = re.split(r'(?<=[.!?])\s+|\n', sentence_buffer)
+                            for i in range(len(parts) - 1):
+                                sentence = parts[i].strip()
+                                if sentence:
+                                    self.speak_chunk(sentence)
+                            sentence_buffer = parts[-1]
+
+                # Finish any logic for this specific stream
+                if sentence_buffer.strip():
+                    self.speak_chunk(sentence_buffer.strip())
+                
+                if header_printed:
+                    print() # End the Aura line
+
+                # 3. If there were tool calls, execute them and RE-QUERY
+                if tool_calls:
+                    messages.append({'role': 'assistant', 'content': full_response, 'tool_calls': tool_calls})
+                    for tool in tool_calls:
                         result = self._execute_tool(tool)
                         messages.append({
                             'role': 'tool',
                             'content': str(result),
                         })
-                    continue # Re-run chat with tool results
+                    continue # Re-run chat with tool results to get the final verbal response
+                
+                break # No tool calls, we are done
 
-                # Otherwise, speak the final answer
-                answer = message['content']
-                if answer:
-                    self.speak(answer)
-                break
-
-            except ollama.ResponseError as e:
-                print(f"Ollama Error: {e}")
-                print("Make sure Ollama is running and the model supports tools.")
-                break
             except Exception as e:
-                print(f"Error getting response: {e}")
+                print(f"\nError getting response: {e}")
                 break
 
     def ask_aura(self):
@@ -445,13 +533,20 @@ def check_dependencies():
             required = [line.strip() for line in f if line.strip() and not line.startswith("#")]
         
         missing = []
+        # Mapping of package name in requirements.txt to its actual import name
+        import_mapping = {
+            "onnxruntime-gpu": "onnxruntime",
+            "onnxruntime": "onnxruntime",
+            "faster-whisper": "faster_whisper",
+            "kokoro-onnx": "kokoro_onnx",
+            "pypdf": "pypdf"
+        }
+        
         for package in required:
-            # Handle cases like 'kokoro-onnx' which is imported as 'kokoro_onnx'
-            package_name = package.split('==')[0].split('>=')[0].strip().replace('-', '_')
-            if importlib.util.find_spec(package_name) is None:
-                # Special cases where package name != import name
-                if package_name == "faster_whisper" and importlib.util.find_spec("faster_whisper"):
-                    continue
+            clean_name = package.split('==')[0].split('>=')[0].strip()
+            import_name = import_mapping.get(clean_name, clean_name.replace('-', '_'))
+            
+            if importlib.util.find_spec(import_name) is None:
                 missing.append(package)
         
         if missing:
@@ -468,15 +563,28 @@ def check_dependencies():
         print("Make sure Ollama is running (https://ollama.com).")
 
     # 4. Check for CUDA availability
+    gpu_detected = False
     try:
         import torch
         if torch.cuda.is_available():
-            print(f"✅ GPU Acceleration active: {torch.cuda.get_device_name(0)}")
-        else:
-            print("\n⚠️ Warning: CUDA not detected by PyTorch. Moving forward with CPU default.")
+            print(f"✅ GPU Acceleration (PyTorch): {torch.cuda.get_device_name(0)}")
+            gpu_detected = True
     except ImportError:
-        # We don't strictly require torch for the app, so just skip if it's not there
         pass
+
+    try:
+        import onnxruntime as ort
+        providers = ort.get_available_providers()
+        if 'CUDAExecutionProvider' in providers:
+            print(f"✅ GPU Acceleration (ONNX): CUDA detected")
+            gpu_detected = True
+        else:
+            print(f"⚠️ Warning: ONNX Runtime CUDA provider not found. Providers: {providers}")
+    except ImportError:
+        pass
+
+    if not gpu_detected:
+        print("\n⚠️ Warning: No GPU acceleration detected (CUDA). Moving forward with CPU default.")
 
 def main():
     parser = argparse.ArgumentParser(description="Aura-Local: AI Voice Assistant")

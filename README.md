@@ -1,42 +1,41 @@
-# Aura-Local 🌌
+# Aura-Local 🌌 (GPU Optimized Edition)
 
-A private, local AI voice assistant powered by **Ollama** (LLM), **Faster-Whisper** (STT), and **Kokoro-ONNX** (TTS). Aura can see your files, use tools on your computer, and talk back to you—all 100% locally.
+This is a specialized branch of **Aura-Local**, specifically optimized for high-performance interaction using NVIDIA GPUs (CUDA). It features real-time sentence-level streaming for both LLM responses and TTS generation, providing a near-zero latency conversational experience.
 
-## ✨ Features
+## 🚀 GPU Enhancements
 
-- **Voice-to-Voice**: Full conversational flow (Speak -> STT -> LLM -> TTS).
-- **Tool Use (Functions)**: Aura can check the time, open websites in your browser, and monitor your system CPU/RAM.
-- **RAG (Knowledge Base)**: Drop `.txt`, `.md`, or `.pdf` files into the `knowledge/` folder, and Aura will index them using **ChromaDB** to answer your questions.
-- **Customizable Persona**: Edit `system_prompt.txt` to define Aura's personality and behavior.
-- **Privacy First**: Everything runs on your machine. No data leaves your local network.
+- **Sentence-Level Streaming**: Aura starts speaking as soon as the first sentence is generated.
+- **GPU Accelerated TTS**: Uses `onnxruntime-gpu` to run Kokoro-ONNX on CUDA.
+- **Improved STT**: Uses `faster-whisper` on CUDA with the `base.en` model for better accuracy than the CPU version.
+- **Smart RAG**: Enhanced Knowledge Base with Cosine Similarity and relevancy thresholds to prevent hallucinations.
+- **Tool Calling**: Supports real-time tool use (Time, Browser, System Info) even while streaming speech.
 
 ## 🛠️ Prerequisites
 
-1.  **Ollama**: Install [Ollama](https://ollama.com/) and pull the required models:
+1.  **NVIDIA GPU**: Recommended 8GB+ VRAM (Developed on RTX 5060 Ti 16GB).
+2.  **Ollama**: Install [Ollama](https://ollama.com/) and pull the models:
     ```bash
-    ollama pull artifish/llama3.2-uncensored
+    ollama pull goekdenizguelmez/JOSIEFIED-Qwen3
     ollama pull nomic-embed-text
     ```
-2.  **Python 3.10+**
-3.  **System Dependencies**: Aura requires **PortAudio** for sound interaction.
-    - **Ubuntu/Debian**: `sudo apt-get update && sudo apt-get install libportaudio2`
-    - **Fedora**: `sudo dnf install portaudio`
-    - **Arch**: `sudo pacman -S portaudio`
-4.  **GPU Acceleration (Optional but Recommended)**:
-    - Ensure you have the latest **NVIDIA Drivers** installed.
-    - If using CUDA 12, you may need to install additional libraries for Faster-Whisper:
+3.  **Drivers & CUDA**: 
+    - Ensure NVIDIA drivers and CUDA Toolkit 12.x are installed.
+    - Install additional CUDA libraries for Whisper:
       ```bash
       pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
       ```
-
-> **Note**: Aura now automatically checks for these dependencies on startup and will attempt to use your GPU (CUDA) for STT and TTS.
+4.  **System Library**: 
+    - **Ubuntu/Debian**: `sudo apt-get update && sudo apt-get install libportaudio2`
+    - **Fedora**: `sudo dnf install portaudio`
+    - **Arch**: `sudo pacman -S portaudio`
 
 ## 🚀 Installation
 
-1.  **Clone the repository**:
+1.  **Clone and Branch**:
     ```bash
     git clone https://github.com/jkstl/aura-local.git
     cd aura-local
+    git checkout gpu-version
     ```
 2.  **Set up Virtual Environment**:
     ```bash
@@ -46,6 +45,7 @@ A private, local AI voice assistant powered by **Ollama** (LLM), **Faster-Whispe
 3.  **Install Requirements**:
     ```bash
     pip install -r requirements.txt
+    pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
     ```
 
 ## 🎮 Usage
@@ -55,22 +55,15 @@ Run Aura:
 python aura.py
 ```
 
-### Modes
-- **1. Text Chat**: Standard terminal chat.
-- **2. Voice Chat**: Press **Enter** to start recording, speak (up to 30s), and press **Enter** to send.
+### Automatic Checks
+Aura now automatically verifies your environment on startup, checking for:
+- PortAudio installation.
+- Python package dependencies.
+- CUDA availability for both PyTorch and ONNX.
+- Ollama connectivity.
 
-### Tools & RAG
-- **Tools**: Try asking "What time is it?" or "Open google.com".
-- **Knowledge Base**: Place your documents in the `knowledge/` directory. Aura will index them on startup.
-
-## ⚙️ Customization
-
-- **System Prompt**: Edit `system_prompt.txt` to change how Aura responds.
-- **Embedding Model**: Default is `nomic-embed-text` (Ollama).
-- **CLI Options**:
-  ```bash
-  python aura.py --model llama3.2 --voice af_bella --speed 1.0
-  ```
-
-## 📜 License
-MIT
+## 📜 Credits
+- **LLM**: Qwen3 (via Ollama)
+- **TTS**: Kokoro-ONNX
+- **STT**: Faster-Whisper
+- **Vector DB**: ChromaDB
