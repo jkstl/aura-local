@@ -1,47 +1,66 @@
-# Aura-Local
+# Aura-Local 🌌
 
-A local AI voice assistant powered by [Ollama](https://ollama.com/) (LLM) and [Kokoro-ONNX](https://github.com/thewh1teagle/kokoro-onnx) (TTS).
+A private, local AI voice assistant powered by **Ollama** (LLM), **Faster-Whisper** (STT), and **Kokoro-ONNX** (TTS). Aura can see your files, use tools on your computer, and talk back to you—all 100% locally.
 
-## Features
-- **Local LLM**: Uses `artifish/llama3.2-uncensored` by default for uncensored responses.
-- **High-Quality TTS**: Uses Kokoro ONNX for fast, high-quality local speech synthesis.
-- **Configurable**: Change voices, models, and more via CLI arguments.
+## ✨ Features
 
-## Prerequisites
-1. **Ollama**: You must have [Ollama](https://ollama.com/) installed and running.
-   ```bash
-   ollama pull artifish/llama3.2-uncensored
-   ```
-2. **Python 3.10+**
-3. **System Dependencies**: You might need `portaudio` (for `sounddevice`).
-   - Ubuntu/Debian: `sudo apt-get install libportaudio2`
+- **Voice-to-Voice**: Full conversational flow (Speak -> STT -> LLM -> TTS).
+- **Tool Use (Functions)**: Aura can check the time, open websites in your browser, and monitor your system CPU/RAM.
+- **RAG (Knowledge Base)**: Drop `.txt`, `.md`, or `.pdf` files into the `knowledge/` folder, and Aura will index them using **ChromaDB** to answer your questions.
+- **Customizable Persona**: Edit `system_prompt.txt` to define Aura's personality and behavior.
+- **Privacy First**: Everything runs on your machine. No data leaves your local network.
 
-## Installation
+## 🛠️ Prerequisites
 
-1. Clone or navigate to the repository.
-2. Create a virtual environment:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1.  **Ollama**: Install [Ollama](https://ollama.com/) and pull the required models:
+    ```bash
+    ollama pull llama3.2
+    ollama pull nomic-embed-text
+    ```
+2.  **Python 3.10+**
+3.  **System Dependencies**: 
+    - Ubuntu/Debian: `sudo apt-get install libportaudio2`
 
-## Usage
+## 🚀 Installation
 
-Run the assistant:
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/jkstl/aura-local.git
+    cd aura-local
+    ```
+2.  **Set up Virtual Environment**:
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+3.  **Install Requirements**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+## 🎮 Usage
+
+Run Aura:
 ```bash
 python aura.py
 ```
 
-The first time you run it, it will automatically download the required Kokoro model files (~100MB).
+### Modes
+- **1. Text Chat**: Standard terminal chat.
+- **2. Voice Chat**: Press **Enter** to start recording, speak (up to 30s), and press **Enter** to send.
 
-### Options
-```bash
-python aura.py --help
-```
-- `--model`: Change the Ollama model (default: `artifish/llama3.2-uncensored`)
-- `--voice`: Change the TTS voice (default: `af_bella`)
-- `--speed`: Adjust speech speed (default: `1.0`)
+### Tools & RAG
+- **Tools**: Try asking "What time is it?" or "Open google.com".
+- **Knowledge Base**: Place your documents in the `knowledge/` directory. Aura will index them on startup.
+
+## ⚙️ Customization
+
+- **System Prompt**: Edit `system_prompt.txt` to change how Aura responds.
+- **Embedding Model**: Default is `nomic-embed-text` (Ollama).
+- **CLI Options**:
+  ```bash
+  python aura.py --model llama3.2 --voice af_bella --speed 1.0
+  ```
+
+## 📜 License
+MIT
