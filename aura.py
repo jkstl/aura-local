@@ -164,14 +164,14 @@ class AuraAssistant:
                 'type': 'function',
                 'function': {
                     'name': 'get_current_time',
-                    'description': 'Returns the current local date and time.',
+                    'description': 'Returns the current local date and time. ONLY call this if the user explicitly asks for the time or date.',
                 }
             },
             {
                 'type': 'function',
                 'function': {
                     'name': 'open_url',
-                    'description': 'Opens a given URL in the default web browser.',
+                    'description': 'Opens a specific URL in the web browser ONLY when explicitly asked by the user to "open" a site.',
                     'parameters': {
                         'type': 'object',
                         'properties': {
@@ -188,7 +188,7 @@ class AuraAssistant:
                 'type': 'function',
                 'function': {
                     'name': 'get_system_info',
-                    'description': 'Returns current system status like CPU and memory usage.',
+                    'description': 'Returns current system status like CPU and memory usage. ONLY call this if the user asks about performance, CPU, or RAM.',
                 }
             }
         ]
@@ -202,7 +202,7 @@ class AuraAssistant:
             import json
             args = json.loads(args)
 
-        print(f"  [Executing Tool: {name}]")
+        print(f"  [Executing Tool: {name} with args: {args}]")
         
         if name == 'get_current_time':
             return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -210,6 +210,10 @@ class AuraAssistant:
         elif name == 'open_url':
             url = args.get('url')
             if url:
+                # Basic validation: check for a dot and minimum length
+                if '.' not in url or len(url) < 4 or ' ' in url:
+                    return f"Error: '{url}' does not look like a valid URL. I will only open specific web addresses."
+                
                 if not url.startswith(('http://', 'https://')):
                     url = 'https://' + url
                 webbrowser.open(url)
@@ -358,13 +362,15 @@ class AuraAssistant:
             print(f"  [Knowledge found! Found {len(context_docs)} snippets]")
 
         messages = []
-        full_system_prompt = self.system_prompt
+        if self.system_prompt:
+            messages.append({'role': 'system', 'content': self.system_prompt})
+        
+        # Inject context as a separate block to avoid confusing the model
+        user_prompt_with_context = prompt
         if context_str:
-            full_system_prompt += context_str
+            user_prompt_with_context = f"Context from Knowledge Base:\n{context_str}\n\nUser Question: {prompt}"
 
-        if full_system_prompt:
-            messages.append({'role': 'system', 'content': full_system_prompt})
-        messages.append({'role': 'user', 'content': prompt})
+        messages.append({'role': 'user', 'content': user_prompt_with_context})
 
         while True:
             try:
