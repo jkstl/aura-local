@@ -1,0 +1,9 @@
+ollama
+kokoro-onnx
+sounddevice
+numpy
+requests
+onnxruntime
+faster-whisper
+scipy
+
