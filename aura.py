@@ -12,6 +12,9 @@ import numpy as np
 import psutil
 import webbrowser
 from datetime import datetime
+import chromadb
+from chromadb.config import Settings
+from pypdf import PdfReader
 from faster_whisper import WhisperModel
 import scipy.io.wavfile as wav
 
@@ -21,6 +24,82 @@ DEFAULT_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/downl
 MODEL_FILE = "kokoro-v1.0.int8.onnx"
 VOICE_FILE = "voices-v1.0.bin"
 SYSTEM_PROMPT_FILE = "system_prompt.txt"
+KNOWLEDGE_DIR = "knowledge"
+EMBED_MODEL = "nomic-embed-text"
+
+class KnowledgeBase:
+    def __init__(self):
+        self.chroma_client = chromadb.PersistentClient(path="./aura_db")
+        self.collection = self.chroma_client.get_or_create_collection(name="aura_knowledge")
+        
+    def index_files(self):
+        if not os.path.exists(KNOWLEDGE_DIR):
+            os.makedirs(KNOWLEDGE_DIR)
+            return
+
+        print("Updating knowledge base...")
+        files = os.listdir(KNOWLEDGE_DIR)
+        for file in files:
+            path = os.path.join(KNOWLEDGE_DIR, file)
+            if file.endswith('.txt') or file.endswith('.md'):
+                self._index_text_file(path)
+            elif file.endswith('.pdf'):
+                self._index_pdf_file(path)
+
+    def _index_text_file(self, path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self._add_to_collection(path, content)
+        except Exception as e:
+            print(f"Error indexing {path}: {e}")
+
+    def _index_pdf_file(self, path):
+        try:
+            reader = PdfReader(path)
+            content = ""
+            for page in reader.pages:
+                content += page.extract_text() + "\n"
+            self._add_to_collection(path, content)
+        except Exception as e:
+            print(f"Error indexing {path}: {e}")
+
+    def _add_to_collection(self, path, content):
+        # Very simple chunking: split by paragraphs
+        chunks = [c.strip() for c in content.split('\n\n') if c.strip()]
+        if not chunks:
+            return
+
+        # Generate embeddings using Ollama
+        for i, chunk in enumerate(chunks):
+            chunk_id = f"{path}_{i}"
+            
+            try:
+                embedding_resp = ollama.embeddings(model=EMBED_MODEL, prompt=chunk)
+                embedding = embedding_resp['embedding']
+                
+                self.collection.upsert(
+                    ids=[chunk_id],
+                    embeddings=[embedding],
+                    documents=[chunk],
+                    metadatas=[{"source": path}]
+                )
+            except Exception as e:
+                print(f"Error embedding chunk {i} of {path}: {e}")
+
+    def query(self, text, n_results=3):
+        try:
+            embedding_resp = ollama.embeddings(model=EMBED_MODEL, prompt=text)
+            embedding = embedding_resp['embedding']
+            
+            results = self.collection.query(
+                query_embeddings=[embedding],
+                n_results=n_results
+            )
+            return results['documents'][0] if results['documents'] else []
+        except Exception as e:
+            print(f"Error querying knowledge base: {e}")
+            return []
 
 class AuraAssistant:
     def __init__(self, ollama_model, voice, speed, lang):
@@ -30,8 +109,10 @@ class AuraAssistant:
         self.lang = lang
         self.system_prompt = self._load_system_prompt()
         self.available_tools = self._get_tool_definitions()
+        self.kb = KnowledgeBase()
         
         self._ensure_models()
+        self.kb.index_files()
         
         print("Loading Aura's voice engine...")
         try:
@@ -268,9 +349,21 @@ class AuraAssistant:
 
     def process_query(self, prompt):
         print("Thinking...")
+        
+        # Search Knowledge Base
+        context_docs = self.kb.query(prompt)
+        context_str = ""
+        if context_docs:
+            context_str = "\n\nRelevant Context from Knowledge Base:\n" + "\n---\n".join(context_docs)
+            print(f"  [Knowledge found! Found {len(context_docs)} snippets]")
+
         messages = []
-        if self.system_prompt:
-            messages.append({'role': 'system', 'content': self.system_prompt})
+        full_system_prompt = self.system_prompt
+        if context_str:
+            full_system_prompt += context_str
+
+        if full_system_prompt:
+            messages.append({'role': 'system', 'content': full_system_prompt})
         messages.append({'role': 'user', 'content': prompt})
 
         while True:
