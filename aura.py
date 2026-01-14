@@ -17,6 +17,7 @@ DEFAULT_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/downlo
 DEFAULT_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices-v1.0.bin"
 MODEL_FILE = "kokoro-v1.0.int8.onnx"
 VOICE_FILE = "voices-v1.0.bin"
+SYSTEM_PROMPT_FILE = "system_prompt.txt"
 
 class AuraAssistant:
     def __init__(self, ollama_model, voice, speed, lang):
@@ -24,6 +25,7 @@ class AuraAssistant:
         self.voice = voice
         self.speed = speed
         self.lang = lang
+        self.system_prompt = self._load_system_prompt()
         
         self._ensure_models()
         
@@ -61,6 +63,15 @@ class AuraAssistant:
         
         if not os.path.exists(VOICE_FILE):
             self._download_file(DEFAULT_VOICES_URL, VOICE_FILE)
+
+    def _load_system_prompt(self):
+        if os.path.exists(SYSTEM_PROMPT_FILE):
+            try:
+                with open(SYSTEM_PROMPT_FILE, 'r') as f:
+                    return f.read().strip()
+            except Exception as e:
+                print(f"Warning: Could not read system prompt file: {e}")
+        return ""
 
     def speak(self, text):
         print(f"\nAura: {text}")
@@ -188,10 +199,15 @@ class AuraAssistant:
 
     def process_query(self, prompt):
         print("Thinking...")
+        messages = []
+        if self.system_prompt:
+            messages.append({'role': 'system', 'content': self.system_prompt})
+        messages.append({'role': 'user', 'content': prompt})
+
         try:
             response = ollama.chat(
                 model=self.ollama_model, 
-                messages=[{'role': 'user', 'content': prompt}]
+                messages=messages
             )
             answer = response['message']['content']
             self.speak(answer)
