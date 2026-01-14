@@ -9,6 +9,9 @@ import threading
 import time
 import tempfile
 import numpy as np
+import psutil
+import webbrowser
+from datetime import datetime
 from faster_whisper import WhisperModel
 import scipy.io.wavfile as wav
 
@@ -26,6 +29,7 @@ class AuraAssistant:
         self.speed = speed
         self.lang = lang
         self.system_prompt = self._load_system_prompt()
+        self.available_tools = self._get_tool_definitions()
         
         self._ensure_models()
         
@@ -72,6 +76,71 @@ class AuraAssistant:
             except Exception as e:
                 print(f"Warning: Could not read system prompt file: {e}")
         return ""
+
+    def _get_tool_definitions(self):
+        return [
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'get_current_time',
+                    'description': 'Returns the current local date and time.',
+                }
+            },
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'open_url',
+                    'description': 'Opens a given URL in the default web browser.',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'url': {
+                                'type': 'string',
+                                'description': 'The URL to open (e.g., https://www.google.com)',
+                            },
+                        },
+                        'required': ['url'],
+                    },
+                }
+            },
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'get_system_info',
+                    'description': 'Returns current system status like CPU and memory usage.',
+                }
+            }
+        ]
+
+    def _execute_tool(self, tool_call):
+        name = tool_call['function']['name']
+        args = tool_call['function'].get('arguments', {})
+        
+        # Ensure args is a dict (Ollama returns it as a dict usually)
+        if isinstance(args, str):
+            import json
+            args = json.loads(args)
+
+        print(f"  [Executing Tool: {name}]")
+        
+        if name == 'get_current_time':
+            return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        elif name == 'open_url':
+            url = args.get('url')
+            if url:
+                if not url.startswith(('http://', 'https://')):
+                    url = 'https://' + url
+                webbrowser.open(url)
+                return f"Successfully opened {url}"
+            return "Error: No URL provided."
+        
+        elif name == 'get_system_info':
+            cpu = psutil.cpu_percent()
+            mem = psutil.virtual_memory().percent
+            return f"CPU Usage: {cpu}% | Memory Usage: {mem}%"
+        
+        return "Error: Tool not found."
 
     def speak(self, text):
         print(f"\nAura: {text}")
@@ -204,18 +273,40 @@ class AuraAssistant:
             messages.append({'role': 'system', 'content': self.system_prompt})
         messages.append({'role': 'user', 'content': prompt})
 
-        try:
-            response = ollama.chat(
-                model=self.ollama_model, 
-                messages=messages
-            )
-            answer = response['message']['content']
-            self.speak(answer)
-        except ollama.ResponseError as e:
-            print(f"Ollama Error: {e}")
-            print("Make sure Ollama is running and the model is pulled.")
-        except Exception as e:
-            print(f"Error getting response: {e}")
+        while True:
+            try:
+                response = ollama.chat(
+                    model=self.ollama_model, 
+                    messages=messages,
+                    tools=self.available_tools
+                )
+                
+                message = response['message']
+                
+                # If there are tool calls, execute them and continue the loop
+                if message.get('tool_calls'):
+                    messages.append(message)
+                    for tool in message['tool_calls']:
+                        result = self._execute_tool(tool)
+                        messages.append({
+                            'role': 'tool',
+                            'content': str(result),
+                        })
+                    continue # Re-run chat with tool results
+
+                # Otherwise, speak the final answer
+                answer = message['content']
+                if answer:
+                    self.speak(answer)
+                break
+
+            except ollama.ResponseError as e:
+                print(f"Ollama Error: {e}")
+                print("Make sure Ollama is running and the model supports tools.")
+                break
+            except Exception as e:
+                print(f"Error getting response: {e}")
+                break
 
     def ask_aura(self):
         try:
