@@ -3,7 +3,7 @@ kokoro-onnx
 sounddevice
 numpy
 requests
-onnxruntime
+onnxruntime-gpu
 faster-whisper
 scipy
 psutil

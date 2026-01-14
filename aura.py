@@ -17,10 +17,12 @@ from chromadb.config import Settings
 from pypdf import PdfReader
 from faster_whisper import WhisperModel
 import scipy.io.wavfile as wav
+import subprocess
+import importlib.util
 
 # Constants
-DEFAULT_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v1.0.int8.onnx"
-DEFAULT_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices-v1.0.bin"
+DEFAULT_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx"
+DEFAULT_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
 MODEL_FILE = "kokoro-v1.0.int8.onnx"
 VOICE_FILE = "voices-v1.0.bin"
 SYSTEM_PROMPT_FILE = "system_prompt.txt"
@@ -114,20 +116,23 @@ class AuraAssistant:
         self._ensure_models()
         self.kb.index_files()
         
-        print("Loading Aura's voice engine...")
+        print("Loading Aura's voice engine (GPU Accelerated)...")
         try:
-            self.kokoro = Kokoro(MODEL_FILE, VOICE_FILE)
+            # Added providers for GPU acceleration
+            self.kokoro = Kokoro(MODEL_FILE, VOICE_FILE, providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
         except Exception as e:
             print(f"Error loading Kokoro engine: {e}")
             sys.exit(1)
 
-        print("Loading Aura's ears (STT)...")
+        print("Loading Aura's ears (STT - GPU Accelerated)...")
         try:
-            # Using tiny.en for speed, can be changed to base or small
-            self.stt_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+            # Using 'base.en' for better accuracy since we have GPU power
+            # Using 'cuda' device and 'float16' for speed on RTX 50-series
+            self.stt_model = WhisperModel("base.en", device="cuda", compute_type="float16")
         except Exception as e:
             print(f"Error loading STT model: {e}")
-            sys.exit(1)
+            print("Falling back to CPU for STT...")
+            self.stt_model = WhisperModel("base.en", device="cpu", compute_type="int8")
 
     def _download_file(self, url, filename):
         print(f"Downloading {filename}...")
@@ -416,14 +421,73 @@ class AuraAssistant:
         self.process_query(prompt)
         return True
 
+def check_dependencies():
+    """Check if required system and python dependencies are installed."""
+    print("Checking dependencies...")
+    
+    # 1. Check for PortAudio (System dependency)
+    # sounddevice will raise OSError if PortAudio is missing
+    try:
+        import sounddevice as sd
+    except OSError as e:
+        if "PortAudio library not found" in str(e):
+            print("\n❌ Error: PortAudio library not found.")
+            print("Please install it using your system package manager:")
+            print("  Ubuntu/Debian: sudo apt-get update && sudo apt-get install libportaudio2")
+            print("  Fedora: sudo dnf install portaudio")
+            print("  Arch: sudo pacman -S portaudio")
+            sys.exit(1)
+        raise e
+
+    # 2. Check Python packages from requirements.txt
+    if os.path.exists("requirements.txt"):
+        with open("requirements.txt", "r") as f:
+            required = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        
+        missing = []
+        for package in required:
+            # Handle cases like 'kokoro-onnx' which is imported as 'kokoro_onnx'
+            package_name = package.split('==')[0].split('>=')[0].strip().replace('-', '_')
+            if importlib.util.find_spec(package_name) is None:
+                # Special cases where package name != import name
+                if package_name == "faster_whisper" and importlib.util.find_spec("faster_whisper"):
+                    continue
+                missing.append(package)
+        
+        if missing:
+            print(f"\n❌ Missing Python packages: {', '.join(missing)}")
+            print("Please install them using:")
+            print("  pip install -r requirements.txt")
+            sys.exit(1)
+    
+    # 3. Check if Ollama is running
+    try:
+        requests.get("http://localhost:11434/api/tags", timeout=2)
+    except Exception:
+        print("\n⚠️ Warning: Could not connect to Ollama.")
+        print("Make sure Ollama is running (https://ollama.com).")
+
+    # 4. Check for CUDA availability
+    try:
+        import torch
+        if torch.cuda.is_available():
+            print(f"✅ GPU Acceleration active: {torch.cuda.get_device_name(0)}")
+        else:
+            print("\n⚠️ Warning: CUDA not detected by PyTorch. Moving forward with CPU default.")
+    except ImportError:
+        # We don't strictly require torch for the app, so just skip if it's not there
+        pass
+
 def main():
     parser = argparse.ArgumentParser(description="Aura-Local: AI Voice Assistant")
-    parser.add_argument("--model", type=str, default="artifish/llama3.2-uncensored", help="Ollama model to use")
+    parser.add_argument("--model", type=str, default="goekdenizguelmez/JOSIEFIED-Qwen3", help="Ollama model to use")
     parser.add_argument("--voice", type=str, default="af_bella", help="Kokoro voice to use")
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed")
     parser.add_argument("--lang", type=str, default="en-us", help="Language code")
     
     args = parser.parse_args()
+    
+    check_dependencies()
     
     app = AuraAssistant(
         ollama_model=args.model,

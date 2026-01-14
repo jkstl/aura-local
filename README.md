@@ -14,12 +14,22 @@ A private, local AI voice assistant powered by **Ollama** (LLM), **Faster-Whispe
 
 1.  **Ollama**: Install [Ollama](https://ollama.com/) and pull the required models:
     ```bash
-    ollama pull llama3.2
+    ollama pull artifish/llama3.2-uncensored
     ollama pull nomic-embed-text
     ```
 2.  **Python 3.10+**
-3.  **System Dependencies**: 
-    - Ubuntu/Debian: `sudo apt-get install libportaudio2`
+3.  **System Dependencies**: Aura requires **PortAudio** for sound interaction.
+    - **Ubuntu/Debian**: `sudo apt-get update && sudo apt-get install libportaudio2`
+    - **Fedora**: `sudo dnf install portaudio`
+    - **Arch**: `sudo pacman -S portaudio`
+4.  **GPU Acceleration (Optional but Recommended)**:
+    - Ensure you have the latest **NVIDIA Drivers** installed.
+    - If using CUDA 12, you may need to install additional libraries for Faster-Whisper:
+      ```bash
+      pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+      ```
+
+> **Note**: Aura now automatically checks for these dependencies on startup and will attempt to use your GPU (CUDA) for STT and TTS.
 
 ## 🚀 Installation
 
