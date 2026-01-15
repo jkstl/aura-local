@@ -300,32 +300,6 @@ class AuraAssistant:
             {
                 'type': 'function',
                 'function': {
-                    'name': 'write_file',
-                    'description': 'Writes or appends a text snippet to a file.',
-                    'parameters': {
-                        'type': 'object',
-                        'properties': {
-                            'path': {
-                                'type': 'string',
-                                'description': 'The path to the file.',
-                            },
-                            'content': {
-                                'type': 'string',
-                                'description': 'The text content to write.',
-                            },
-                            'mode': {
-                                'type': 'string',
-                                'description': 'Writing mode: \'w\' (overwrite) or \'a\' (append). Defaults to \'a\'.',
-                                'enum': ['w', 'a']
-                            }
-                        },
-                        'required': ['path', 'content'],
-                    },
-                }
-            },
-            {
-                'type': 'function',
-                'function': {
                     'name': 'set_volume',
                     'description': 'Adjusts the system volume.',
                     'parameters': {
@@ -389,16 +363,6 @@ class AuraAssistant:
             except Exception as e:
                 return f"Error reading file: {e}"
 
-        elif name == 'write_file':
-            path = args.get('path')
-            content = args.get('content')
-            mode = args.get('mode', 'a')
-            try:
-                with open(path, mode, encoding='utf-8') as f:
-                    f.write(content + "\n")
-                return f"Successfully {'written' if mode=='w' else 'appended'} to {path}"
-            except Exception as e:
-                return f"Error writing to file: {e}"
 
         elif name == 'set_volume':
             level = args.get('level')
