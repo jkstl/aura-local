@@ -265,11 +265,24 @@ class AuraAssistant:
         - If the statement contains a factual detail about the user, output it as a concise sentence.
         - If the statement is just small talk, questions, or irrelevant, output 'NO_FACT'.
         - Format: Just the fact sentence or NO_FACT. Do not explain.
+        
+        Examples:
+        Input: "I love pepperoni pizza."
+        Output: The user likes pepperoni pizza.
+        
+        Input: "Hi, how are you?"
+        Output: NO_FACT
+        
+        Input: "My dog's name is Rex."
+        Output: The user has a dog named Rex.
+        
+        Input: "I'm thinking of buying a Tesla."
+        Output: The user is considering buying a Tesla.
         """
         # We use Llama 3.2 for this as it is smarter at logic
         try:
             resp = ollama.chat(
-                model="llama3.2", 
+                model="artifish/llama3.2-uncensored", 
                 messages=[{'role': 'user', 'content': extraction_prompt}]
             )
             fact = resp['message']['content'].strip()
@@ -742,7 +755,7 @@ def check_dependencies():
 def main():
     parser = argparse.ArgumentParser(description="Aura-Local: AI Voice Assistant")
     parser.add_argument("--model", type=str, default="goekdenizguelmez/JOSIEFIED-Qwen3", help="Ollama model to use")
-    parser.add_argument("--voice", type=str, default="af_sarah", help="Kokoro voice to use")
+    parser.add_argument("--voice", type=str, default="af_nicole", help="Kokoro voice to use")
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed")
     parser.add_argument("--lang", type=str, default="en-us", help="Language code")
     
