@@ -757,7 +757,7 @@ def check_dependencies():
 def main():
     parser = argparse.ArgumentParser(description="Aura-Local: AI Voice Assistant")
     parser.add_argument("--model", type=str, default="goekdenizguelmez/JOSIEFIED-Qwen3", help="Ollama model to use")
-    parser.add_argument("--voice", type=str, default="af_bella", help="Kokoro voice to use")
+    parser.add_argument("--voice", type=str, default="af_sarah", help="Kokoro voice to use")
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed")
     parser.add_argument("--lang", type=str, default="en-us", help="Language code")
     
