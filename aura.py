@@ -115,8 +115,8 @@ class KnowledgeBase:
             if results['documents'] and results['distances']:
                 for doc, dist in zip(results['documents'][0], results['distances'][0]):
                     # With cosine: 0.0 is identical, 1.0 is unrelated, 2.0 is opposite.
-                    # 0.45 is a solid threshold for 'actually relevant'
-                    if dist < 0.45: 
+                    # Relaxed to 0.55 to catch 'favorite color matches' which sat around 0.46
+                    if dist < 0.55: 
                         valid_docs.append(doc)
                     # print(f"      [DEBUG: Distance check - {dist:.4f}]") # Enable for debugging
             
@@ -625,7 +625,8 @@ class AuraAssistant:
         print("\nUpdating Aura's long-term memory...")
         try:
             # Use a quick summary prompt
-            summary_prompt = "Below is a chat history between Aura and Jeff. Summarize any important facts about Jeff, his preferences, or significant tasks discussed. Be concise and write in a way that can be indexed into a knowledge base. If nothing important was discussed, simply return 'NO_NEW_FACTS'.\n\nHistory:\n"
+            # Strict prompt: Only remember if explicitly asked
+            summary_prompt = "Below is a chat history between Aura and Jeff. You are a memory manager. extract ONLY facts where Jeff explicitly asks you to 'remember', 'save', 'note', or 'remind' him of something. Ignore all other conversation, small talk, or general questions. If Jeff says 'Remember that...', save it. If he says 'My favorite color is green' WITHOUT saying 'remember', IGNORE IT. If no explicit memory requests are found, return 'NO_NEW_FACTS'.\n\nHistory:\n"
             for msg in self.session_history:
                 summary_prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
             
