@@ -102,6 +102,13 @@ class KnowledgeBase:
                 print(f"Error embedding chunk {i} of {path}: {e}")
 
     def query(self, text, n_results=3):
+        # Chatter Filter: Don't query DB for simple greetings or short phrases
+        # This prevents RAG from hallucinating context for "hi"
+        low_text = text.lower().strip()
+        common_greetings = ["hi", "hello", "hey", "hola", "sup", "yo", "ok", "cool", "thanks", "thank you", "bye", "exit"]
+        if len(low_text.split()) < 4 and any(g in low_text for g in common_greetings):
+            return []
+
         try:
             embedding_resp = ollama.embeddings(model=EMBED_MODEL, prompt=text)
             embedding = embedding_resp['embedding']
