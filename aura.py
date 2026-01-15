@@ -33,6 +33,7 @@ DEFAULT_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/downl
 MODEL_FILE = "kokoro-v1.0.int8.onnx"
 VOICE_FILE = "voices-v1.0.bin"
 SYSTEM_PROMPT_FILE = "system_prompt.txt"
+OLLAMA_MODEL = "goekdenizguelmez/JOSIEFIED-Qwen3" 
 KNOWLEDGE_DIR = "knowledge"
 EMBED_MODEL = "nomic-embed-text"
 
