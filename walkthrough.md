@@ -11,18 +11,16 @@ Aura can now interact with your computer in more ways:
 - **Volume Control**: Ask "Set my volume to 50%" (uses `amixer` on Linux).
 - **Expanded System Info**: Now includes **Battery Status** alongside CPU and RAM.
 
-### 2. Self-Learning Memory 🧠
-Aura now learns from your conversations:
-- **Session Tracking**: Aura keeps a log of what you discuss during a session.
-- **Summarization**: When you exit the program (`Ctrl+C` or typing 'exit'), Aura uses the LLM to summarize key facts about you (preferences, name, tasks).
-- **Persistent Memory**: These facts are saved to `knowledge/memory.txt`.
-- **Automatic Retrieval**: On next startup, Aura's Knowledge Base automatically indexes this file. She will remember who you are and what you like!
+### 2. Self-Learning Memory (Aura v2) 🧠
+Aura now has a subconscious "Observer" that listens for facts:
+- **Passive Memory**: You don't need to say "Remember". Just speak naturally.
+- **Background Extraction**: If you say "My girlfriend Giana broke up with me," the Observer silently notes: `Fact: Jeff broke up with Giana`.
+- **Immediate Indexing**: Facts are available to the RAG system *immediately* for the next sentence, not just after restart.
 
 ## Final Polish & Logic Tuning 💎
 To ensure Aura is professional yet fun, we implemented three key logic layers:
 1.  **Chatter Filter**: Aura now ignores the database for simple greetings ("hi", "ok") to prevent "hallucinating" context for small talk.
-2.  **Explicit Memory Only**: She only saves facts to long-term memory if you use trigger words like "Remember", "Save", or "Remind me".
-3.  **Banter Mode**: The system prompt now explicitly tells her to prioritize sarcasm and wit over database searches when you are making jokes.
+2.  **Banter Mode**: The system prompt now explicitly tells her to prioritize sarcasm and wit over database searches when you are making jokes.
 
 ## Code Changes
 

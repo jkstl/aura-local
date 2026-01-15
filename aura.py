@@ -46,6 +46,28 @@ class KnowledgeBase:
             metadata={"hnsw:space": "cosine"}
         )
         
+    def add_fact(self, fact_text):
+        """Adds a specific derived fact to the knowledge base."""
+        print(f"      [Memory] Indexing new fact: '{fact_text}'")
+        self._add_to_collection("memory_fact", fact_text, "memory_fact")
+
+    def _add_to_collection(self, path, content, metadata_type="document"):
+        # Create embedding using Ollama
+        try:
+            chunks = [content[i:i+500] for i in range(0, len(content), 500)]
+            for i, chunk in enumerate(chunks):
+                embedding_resp = ollama.embeddings(model=EMBED_MODEL, prompt=chunk)
+                embedding = embedding_resp['embedding']
+                
+                self.collection.add(
+                    ids=[f"{path}_{int(time.time())}_{i}"],
+                    embeddings=[embedding],
+                    documents=[chunk],
+                    metadatas=[{"source": path, "type": metadata_type, "timestamp": str(datetime.now())}]
+                )
+        except Exception as e:
+             print(f"Error adding to collection: {e}")
+
     def index_files(self):
         if not os.path.exists(KNOWLEDGE_DIR):
             os.makedirs(KNOWLEDGE_DIR)
@@ -78,28 +100,6 @@ class KnowledgeBase:
         except Exception as e:
             print(f"Error indexing {path}: {e}")
 
-    def _add_to_collection(self, path, content):
-        # Very simple chunking: split by paragraphs
-        chunks = [c.strip() for c in content.split('\n\n') if c.strip()]
-        if not chunks:
-            return
-
-        # Generate embeddings using Ollama
-        for i, chunk in enumerate(chunks):
-            chunk_id = f"{path}_{i}"
-            
-            try:
-                embedding_resp = ollama.embeddings(model=EMBED_MODEL, prompt=chunk)
-                embedding = embedding_resp['embedding']
-                
-                self.collection.upsert(
-                    ids=[chunk_id],
-                    embeddings=[embedding],
-                    documents=[chunk],
-                    metadatas=[{"source": path}]
-                )
-            except Exception as e:
-                print(f"Error embedding chunk {i} of {path}: {e}")
 
     def query(self, text, n_results=3):
         # Chatter Filter: Don't query DB for simple greetings or short phrases
@@ -164,13 +164,18 @@ class AuraAssistant:
             print("Falling back to CPU for STT...")
             self.stt_model = WhisperModel("base.en", device="cpu", compute_type="int8")
 
-        # Session history for long-term memory
+        # Session history for long-term memory (Deprecated in v2, but keeping for context if needed)
         self.session_history = []
         
         # Audio playback queue and thread
         self.audio_queue = queue.Queue()
         self.playback_thread = threading.Thread(target=self._playback_worker, daemon=True)
         self.playback_thread.start()
+
+        # [v2] Memory Observer Queue and Thread
+        self.memory_queue = queue.Queue()
+        self.memory_thread = threading.Thread(target=self._memory_observer_loop, daemon=True)
+        self.memory_thread.start()
 
     def _playback_worker(self):
         """Background thread that plays audio chunks from the queue."""
@@ -230,6 +235,56 @@ class AuraAssistant:
             except Exception as e:
                 print(f"Warning: Could not read system prompt file: {e}")
         return ""
+
+    def _memory_observer_loop(self):
+        """
+        Background thread that watches user input and extracts facts.
+        """
+        while True:
+            user_text = self.memory_queue.get()
+            if user_text is None:
+                break
+            
+            try:
+                # 1. Check if potential fact
+                # Minimal logic: Don't check 1-word answers
+                if len(user_text.split()) > 3:
+                     self._extract_and_save_facts(user_text)
+            except Exception as e:
+                print(f"[Memory Observer Error] {e}")
+            finally:
+                self.memory_queue.task_done()
+
+    def _extract_and_save_facts(self, user_text):
+        """Uses LLM to extract facts from user text."""
+        extraction_prompt = f"""
+        Analyze the following user statement and extract any NEW facts about the user (preferences, relationships, tasks, life events, ownership).
+        User Statement: "{user_text}"
+        
+        Rules:
+        - If the statement contains a factual detail about the user, output it as a concise sentence.
+        - If the statement is just small talk, questions, or irrelevant, output 'NO_FACT'.
+        - Format: Just the fact sentence or NO_FACT. Do not explain.
+        """
+        # We use Llama 3.2 for this as it is smarter at logic
+        try:
+            resp = ollama.chat(
+                model="llama3.2", 
+                messages=[{'role': 'user', 'content': extraction_prompt}]
+            )
+            fact = resp['message']['content'].strip()
+            
+            if "NO_FACT" not in fact and len(fact) > 5:
+                # Deduplication check (simple)
+                existing = self.kb.query(fact, n_results=1)
+                # If we find a very close match (distance < 0.3), meaningful duplicate
+                # For now, just add it. Chroma handles exact dupes if IDs match, but we generate unique IDs.
+                # We will rely on RAG retrieval to pick the best one later.
+                self.kb.add_fact(fact)
+                
+        except Exception as e:
+            # Silently fail in background to not disturb chat
+            pass
 
     def _get_tool_definitions(self):
         return [
@@ -398,7 +453,6 @@ class AuraAssistant:
         try:
             choice = input("\nSelect mode (1 or 2): ").strip()
         except (EOFError, KeyboardInterrupt):
-            self._update_long_term_memory()
             print("\nGoodbye!")
             return
 
@@ -406,8 +460,6 @@ class AuraAssistant:
             self.voice_chat_loop()
         else:
             self.text_chat_loop()
-            
-        self._update_long_term_memory()
 
     def text_chat_loop(self):
         print("\n--- Text Chat Mode Active ---")
@@ -520,6 +572,11 @@ class AuraAssistant:
         if full_system_prompt:
             messages.append({'role': 'system', 'content': full_system_prompt})
         messages.append({'role': 'user', 'content': prompt})
+        
+        # [v2] Send to Memory Observer
+        self.memory_queue.put(prompt)
+        
+        # Keep session history for context window only (not for saving anymore)
         self.session_history.append({'role': 'user', 'content': prompt})
 
         while True:
@@ -589,42 +646,6 @@ class AuraAssistant:
                 print(f"\nError getting response: {e}")
                 break
 
-    def _update_long_term_memory(self):
-        """Summarizes the session and saves important facts to the knowledge base."""
-        if not self.session_history:
-            return
-
-        print("\nUpdating Aura's long-term memory...")
-        try:
-            # Use a quick summary prompt
-            # Load existing memory context (last 4KB to save context window)
-            existing_memory = ""
-            if os.path.exists(os.path.join(KNOWLEDGE_DIR, "memory.txt")):
-                 with open(os.path.join(KNOWLEDGE_DIR, "memory.txt"), 'r', encoding='utf-8') as f:
-                     existing_memory = f.read()[-4000:]
-
-            # Strict prompt: Only remember if explicitly asked + Deduplicate
-            summary_prompt = f"Below is a chat history between Aura and Jeff.\n\nEXISTING MEMORY:\n{existing_memory}\n\nINSTRUCTION:\nYou are a memory manager. Extract ONLY NEW facts where Jeff explicitly asks you to 'remember', 'save', 'note', or 'remind' him of something. Ignore all other conversation. IMPORTANT: If a fact is ALREADY in the EXISTING MEMORY above, DO NOT include it again. Return ONLY the new, unique facts. If no new explicit memory requests are found, return 'NO_NEW_FACTS'.\n\nNEW CHAT HISTORY:\n"
-            for msg in self.session_history:
-                summary_prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
-            
-            resp = ollama.chat(
-                model=self.ollama_model,
-                messages=[{'role': 'user', 'content': summary_prompt}]
-            )
-            
-            summary = resp['message']['content'].strip()
-            
-            if "NO_NEW_FACTS" not in summary.upper():
-                memory_file = os.path.join(KNOWLEDGE_DIR, "memory.txt")
-                with open(memory_file, 'a', encoding='utf-8') as f:
-                    f.write(f"\n--- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
-                    f.write(summary + "\n")
-                print("✅ Memory updated.")
-            else:
-                print("ℹ️ No new key facts to remember from this session.")
-        except Exception as e:
-            print(f"Warning: Could not update long-term memory: {e}")
 
     def ask_aura(self):
         try:
