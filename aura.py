@@ -625,8 +625,14 @@ class AuraAssistant:
         print("\nUpdating Aura's long-term memory...")
         try:
             # Use a quick summary prompt
-            # Strict prompt: Only remember if explicitly asked
-            summary_prompt = "Below is a chat history between Aura and Jeff. You are a memory manager. extract ONLY facts where Jeff explicitly asks you to 'remember', 'save', 'note', or 'remind' him of something. Ignore all other conversation, small talk, or general questions. If Jeff says 'Remember that...', save it. If he says 'My favorite color is green' WITHOUT saying 'remember', IGNORE IT. If no explicit memory requests are found, return 'NO_NEW_FACTS'.\n\nHistory:\n"
+            # Load existing memory context (last 4KB to save context window)
+            existing_memory = ""
+            if os.path.exists(os.path.join(KNOWLEDGE_DIR, "memory.txt")):
+                 with open(os.path.join(KNOWLEDGE_DIR, "memory.txt"), 'r', encoding='utf-8') as f:
+                     existing_memory = f.read()[-4000:]
+
+            # Strict prompt: Only remember if explicitly asked + Deduplicate
+            summary_prompt = f"Below is a chat history between Aura and Jeff.\n\nEXISTING MEMORY:\n{existing_memory}\n\nINSTRUCTION:\nYou are a memory manager. Extract ONLY NEW facts where Jeff explicitly asks you to 'remember', 'save', 'note', or 'remind' him of something. Ignore all other conversation. IMPORTANT: If a fact is ALREADY in the EXISTING MEMORY above, DO NOT include it again. Return ONLY the new, unique facts. If no new explicit memory requests are found, return 'NO_NEW_FACTS'.\n\nNEW CHAT HISTORY:\n"
             for msg in self.session_history:
                 summary_prompt += f"{msg['role'].capitalize()}: {msg['content']}\n"
             
